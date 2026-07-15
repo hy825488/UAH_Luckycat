@@ -1,0 +1,36 @@
+# Gradle files
+.gradle/
+build/
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Android Studio generated files
+.idea/
+.DS_Store
+*.iml
+*.iws
+*.ipr
+
+# IntelliJ IDEA
+out/
+*.iml
+
+# Keystore files
+*.jks
+*.keystore
+
+# Log files
+*.log
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
