@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed 作用域：建議勾選的目標 App 套件名 -->
+    <string-array name="xposedscope">
+        <!-- Genshin Impact -->
+        <item>com.miHoYo.GenshinImpact</item>
+        <item>com.miHoYo.ys.mihoyo</item>
+        <item>com.miHoYo.Yuanshen</item>
+        <!-- Honkai: Star Rail -->
+        <item>com.HoYoverse.hkrpgoversea</item>
+        <item>com.miHoYo.hkrpg</item>
+        <!-- Zenless Zone Zero -->
+        <item>com.HoYoverse.Nap</item>
+        <item>com.miHoYo.Nap</item>
+    </string-array>
+</resources>

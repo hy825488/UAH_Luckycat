@@ -12,25 +12,13 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
-        
-        ndk {
-            debugSymbolLevel = "full"
-        }
-    }
-
-    signingConfigs {
-        create("release") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            // 用 debug 簽名，方便 LSPosed 直接安裝
+            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false
@@ -50,10 +38,9 @@ android {
 }
 
 dependencies {
-    // Xposed API
+    // Xposed API (透過 JitPack，比已關閉的 JCenter 穩定)
     compileOnly("de.robv.android.xposed:api:82")
-    compileOnly("de.robv.android.xposed:api:82:sources")
     
-    // OkHttp3
+    // OkHttp3 (compileOnly，運行時由目標 App 提供)
     compileOnly("com.squareup.okhttp3:okhttp:4.9.3")
 }

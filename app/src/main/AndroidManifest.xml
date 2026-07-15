@@ -4,6 +4,26 @@
 
     <application
         android:label="@string/app_name">
+
+        <!-- 標記為 Xposed/LSPosed 模組 -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Luckycat device fingerprint rotator for HoYoverse payment APIs" />
+
+        <!-- 最低支援的 API 版本 -->
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+
+        <!-- 模組作用域 -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposedscope" />
+
     </application>
 
 </manifest>
