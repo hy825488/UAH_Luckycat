@@ -38,8 +38,10 @@ class MainHook : IXposedHookLoadPackage {
         private const val ORDER_COUNTRY        = "UA"   // 原本 order.country=TWN(alpha-3)，改用 UA 統一
         private const val ORDER_CURRENCY       = "UAH"
 
-        // createOrder 段的開關。true = 照要求一起改（會破壞 sign，僅供實驗看 retcode）。
-        private const val MODIFY_CREATE_ORDER = true
+        // createOrder 段的開關。
+        // 實測證實：sign 涵蓋 country/currency，改 body 必得 retcode 127「參數簽名不正確」，
+        // 且會讓所有購買失敗。故預設關閉。要真送 UA 單必須改走 Frida 掛 libil2cpp.so 重簽。
+        private const val MODIFY_CREATE_ORDER = false
         // verify 段：若 body 內出現同名 key 就一併改（防禦性，key 不存在則不動）。
         private const val MODIFY_VERIFY = true
     }
