@@ -11,7 +11,7 @@
 
         <meta-data
             android:name="xposeddescription"
-            android:value="Luckycat device fingerprint rotator for HoYoverse payment APIs" />
+            android:value="Luckycat UA/UAH country rewriter for HoYoverse payment APIs (listAppPayPlat/createOrder/verify)" />
 
         <!-- 最低支援的 API 版本 -->
         <meta-data
