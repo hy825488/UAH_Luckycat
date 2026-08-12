@@ -31,11 +31,11 @@ class MainHook : IXposedHookLoadPackage {
         // ===== 烏克蘭欄位設定（要改格式直接改這裡）=====
         // 註：app 自己的格式不一致 —— app_download_country / order.country 用 alpha-3(TWN)，
         //     store_country 用 alpha-2(HK)。這裡各自沿用對應格式：UKR / UA。
-        private const val APP_DOWNLOAD_COUNTRY = "UKR"  // alpha-3，對應原本 TWN
+        private const val APP_DOWNLOAD_COUNTRY = "UA"   // 原本 TWN(alpha-3)，改用 UA 統一
         private const val STORE_COUNTRY        = "UA"   // alpha-2，對應原本 HK
         private const val STORE_CURRENCY       = "UAH"
         private const val GAME_CURRENCY        = "UAH"
-        private const val ORDER_COUNTRY        = "UKR"  // alpha-3，對應原本 order.country=TWN
+        private const val ORDER_COUNTRY        = "UA"   // 原本 order.country=TWN(alpha-3)，改用 UA 統一
         private const val ORDER_CURRENCY       = "UAH"
 
         // createOrder 段的開關。true = 照要求一起改（會破壞 sign，僅供實驗看 retcode）。
