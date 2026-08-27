@@ -41,7 +41,10 @@ class MainHook : IXposedHookLoadPackage {
         // createOrder 段的開關。
         // 實測證實：sign 涵蓋 country/currency，改 body 必得 retcode 127「參數簽名不正確」，
         // 且會讓所有購買失敗。故預設關閉。要真送 UA 單必須改走 Frida 掛 libil2cpp.so 重簽。
-        private const val MODIFY_CREATE_ORDER = false
+        // 烏克蘭客戶要求：偵測 createOrder，request body 內 TWN → UAH（見 rewrite() 的 createOrder 段）。
+        // ⚠️ createOrder body 帶 sign(native il2cpp 算)，改 body 後 sign 對不上可能回 retcode 127；
+        //    若客戶端/後端未驗 sign 或另有重簽則不受影響。依需求開啟。
+        private const val MODIFY_CREATE_ORDER = true
         // verify 段：若 body 內出現同名 key 就一併改（防禦性，key 不存在則不動）。
         private const val MODIFY_VERIFY = true
     }
@@ -121,9 +124,9 @@ class MainHook : IXposedHookLoadPackage {
                 .let { setField(it, "store_currency", STORE_CURRENCY) }
                 .let { setField(it, "game_currency", GAME_CURRENCY) }
             "createOrder" -> json
-                // order 物件內的 country / currency（這兩個 key 只出現在 order 裡）
-                .let { setField(it, "country", ORDER_COUNTRY) }
-                .let { setField(it, "currency", ORDER_CURRENCY) }
+                // 烏克蘭客戶需求：request body 內的 TWN 一律改成 UAH（直接字串替換，就這樣）。
+                // 只替換 JSON 字串值 "TWN"（含引號）→ "UAH"，避免誤傷其他 token。
+                .replace("\"TWN\"", "\"UAH\"")
             "verify" -> json
                 // 防禦性：verify body 若含這些 key 才改，沒有就原樣返回
                 .let { setFieldIfPresent(it, "app_download_country", APP_DOWNLOAD_COUNTRY) }
