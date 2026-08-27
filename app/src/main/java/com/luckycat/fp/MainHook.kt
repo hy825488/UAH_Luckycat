@@ -2,10 +2,13 @@ package com.luckycat.fp
 
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XC_MethodReplacement
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.lang.reflect.Method
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Luckycat 國家欄位改寫插件（UA/UAH）
@@ -59,10 +62,63 @@ class MainHook : IXposedHookLoadPackage {
         if (!isTargetApp(lpparam.packageName)) return
         try {
             log("Loaded app: ${lpparam.packageName}")
+            hookDeviceFingerprint(lpparam)  // ★把上報 miHoYo 的設備/環境指紋洗成「乾淨烏克蘭裝置」
             hookSign(lpparam)      // ★createOrder sign 正解：簽前改參數（TWN→UAH），sign 一致
             hookOkHttp(lpparam)    // listAppPayPlat / verify 仍走 body 改寫（無 sign 或防禦性）
         } catch (e: Throwable) {
             log("Error: ${e.message}")
+        }
+    }
+
+    // ★★ 設備/環境指紋洗白：讓 app 上報給 miHoYo 風控的訊號全部變成「乾淨的烏克蘭裝置」。
+    //    對應 BaseDataReport 蒐集的欄位：is_root / proxy_status / emulator_status / debug_status /
+    //    country / language / time_zone / mobile_operators。app 端能改的全改；唯一改不了的是「來源 IP」。
+    private fun hookDeviceFingerprint(lpparam: XC_LoadPackage.LoadPackageParam) {
+        val cl = lpparam.classLoader
+        val du = "com.combosdk.support.base.utils.DeviceUtils"
+        val ctx = "android.content.Context"
+
+        // 1) 風控紅旗全歸零（root/代理/模擬器/除錯）——這是「改機」最大破綻
+        hookConst(du, cl, "isRooted", 0, ctx)
+        hookConst(du, cl, "isProxy", 0)
+        hookConst(du, cl, "isEmulator", 0, ctx)
+        hookConst(du, cl, "hasOpenDebugMode", 0, ctx)
+        // 電信商清空（避免露台灣電信商）
+        hookConst(du, cl, "getOperatorType", "", ctx)
+
+        // 2) 國碼 → 烏克蘭 alpha-3（訂單 country 與指紋 country 同源）
+        hookConst("com.mihoyoos.sdk.platform.common.utils.CountryUtils\$Companion", cl, "getCountry", "UKR")
+
+        // 3) x-rpc-language header 的值 → uk-ua
+        hookConst("com.miHoYo.platform.account.oversea.sdk.PorteOSInfo", cl, "getLanguageCode", "uk-ua")
+
+        // 4) 系統 locale → uk_UA（指紋 language/country 多半由 Locale 衍生）
+        try {
+            val uk = Locale("uk", "UA")
+            XposedHelpers.findAndHookMethod(Locale::class.java, "getDefault", XC_MethodReplacement.returnConstant(uk))
+            log("hooked Locale.getDefault -> uk_UA")
+        } catch (e: Throwable) { log("hook Locale fail: ${e.message}") }
+
+        // 5) 系統時區 → Europe/Kyiv（+2/+3，對齊烏克蘭）
+        try {
+            val kyiv = TimeZone.getTimeZone("Europe/Kyiv")
+            XposedHelpers.findAndHookMethod(TimeZone::class.java, "getDefault", XC_MethodReplacement.returnConstant(kyiv))
+            log("hooked TimeZone.getDefault -> Europe/Kyiv")
+        } catch (e: Throwable) { log("hook TimeZone fail: ${e.message}") }
+
+        log("device fingerprint spoof installed (clean UA device)")
+    }
+
+    // 小工具：把指定類的方法直接替換成回傳固定值（找不到就記 log，不影響其他 hook）。
+    private fun hookConst(cls: String, cl: ClassLoader, method: String, value: Any, vararg paramTypes: String) {
+        try {
+            val args = ArrayList<Any>()
+            args.addAll(paramTypes)
+            args.add(XC_MethodReplacement.returnConstant(value))
+            XposedHelpers.findAndHookMethod(cls, cl, method, *args.toTypedArray())
+            log("hooked $method -> $value")
+        } catch (e: Throwable) {
+            log("hook $method fail: ${e.message}")
         }
     }
 
