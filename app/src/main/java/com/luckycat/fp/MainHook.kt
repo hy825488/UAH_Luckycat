@@ -38,24 +38,68 @@ class MainHook : IXposedHookLoadPackage {
         private const val ORDER_COUNTRY        = "UA"   // 原本 order.country=TWN(alpha-3)，改用 UA 統一
         private const val ORDER_CURRENCY       = "UAH"
 
-        // createOrder 段的開關。
-        // 實測證實：sign 涵蓋 country/currency，改 body 必得 retcode 127「參數簽名不正確」，
-        // 且會讓所有購買失敗。故預設關閉。要真送 UA 單必須改走 Frida 掛 libil2cpp.so 重簽。
-        // 烏克蘭客戶要求：偵測 createOrder，request body 內 TWN → UAH（見 rewrite() 的 createOrder 段）。
-        // ⚠️ createOrder body 帶 sign(native il2cpp 算)，改 body 後 sign 對不上可能回 retcode 127；
-        //    若客戶端/後端未驗 sign 或另有重簽則不受影響。依需求開啟。
-        private const val MODIFY_CREATE_ORDER = true
+        // createOrder 段的「簽後改 body」一律關閉：那樣改必得 retcode 127（sign 對不上）。
+        // 正確作法改用下面的 OSTools.sign hook（簽「前」改參數，sign 天生一致）。
+        private const val MODIFY_CREATE_ORDER = false
         // verify 段：若 body 內出現同名 key 就一併改（防禦性，key 不存在則不動）。
         private const val MODIFY_VERIFY = true
+
+        // ===== createOrder sign 正解（逆向確認）=====
+        // sign = HMAC-SHA256(按key排序串接的所有value, appKey)，由 Java 的
+        //   com.mihoyoos.sdk.platform.common.utils.OSTools.sign(Map, appKey) 計算，
+        //   而傳入的 map 同時是 request body 的 "order" 物件（同一參考）。
+        // → hook OSTools.sign，在「算 sign 之前」把 map 裡的值 TWN 改成 UAH：
+        //   sign 對 UAH 算、body 也是 UAH → server 用 appKey 重算一致 → 通過（不用金鑰/Frida）。
+        private const val SIGN_FROM_VALUE = "TWN"   // 烏克蘭客戶：body 內的 TWN
+        private const val SIGN_TO_VALUE   = "UAH"   // → 改成 UAH
+        // 若之後 server 要求 country 用合法國碼(UA/UKR)+currency=UAH，改成對 key 精準改即可（見 hookSign 註解）。
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (!isTargetApp(lpparam.packageName)) return
         try {
             log("Loaded app: ${lpparam.packageName}")
-            hookOkHttp(lpparam)
+            hookSign(lpparam)      // ★createOrder sign 正解：簽前改參數（TWN→UAH），sign 一致
+            hookOkHttp(lpparam)    // listAppPayPlat / verify 仍走 body 改寫（無 sign 或防禦性）
         } catch (e: Throwable) {
             log("Error: ${e.message}")
+        }
+    }
+
+    // ★核心：hook com.mihoyoos.sdk.platform.common.utils.OSTools.sign(Map, appKey)
+    //   在計算 sign 之前，把傳入 map 裡值為 TWN 的欄位(如 order.country)改成 UAH。
+    //   同一個 map 也是 request body 的 "order" 物件 → sign 與 body 天生一致，server 驗得過。
+    //   只在 map 內出現該值時才動手（等同只影響 createOrder），其他請求不受影響。
+    private fun hookSign(lpparam: XC_LoadPackage.LoadPackageParam) {
+        try {
+            XposedHelpers.findAndHookMethod(
+                "com.mihoyoos.sdk.platform.common.utils.OSTools", lpparam.classLoader,
+                "sign", Map::class.java, String::class.java,
+                object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        try {
+                            @Suppress("UNCHECKED_CAST")
+                            val map = param.args[0] as? MutableMap<String, Any?> ?: return
+                            var changed = false
+                            for (k in map.keys.toList()) {
+                                if (map[k] == SIGN_FROM_VALUE) {   // 例如 "country":"TWN"
+                                    map[k] = SIGN_TO_VALUE
+                                    changed = true
+                                }
+                                // 若要精準改指定 key（server 要合法國碼時），改成例如：
+                                //   if (k == "country") map[k] = "UA"
+                                //   if (k == "currency") map[k] = "UAH"
+                            }
+                            if (changed) log("[OSTools.sign] $SIGN_FROM_VALUE -> $SIGN_TO_VALUE (簽前改，sign 一致) keys=${map.keys}")
+                        } catch (e: Throwable) {
+                            log("sign hook error: ${e.message}")
+                        }
+                    }
+                }
+            )
+            log("OSTools.sign hook installed (createOrder TWN->UAH, sign 一致)")
+        } catch (e: Throwable) {
+            log("Failed to hook OSTools.sign: ${e.message}")
         }
     }
 
