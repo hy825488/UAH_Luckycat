@@ -50,8 +50,8 @@ class MainHook : IXposedHookLoadPackage {
         //   而傳入的 map 同時是 request body 的 "order" 物件（同一參考）。
         // → hook OSTools.sign，在「算 sign 之前」把 map 裡的值 TWN 改成 UAH：
         //   sign 對 UAH 算、body 也是 UAH → server 用 appKey 重算一致 → 通過（不用金鑰/Frida）。
-        private const val SIGN_FROM_VALUE = "TWN"   // 烏克蘭客戶：body 內的 TWN(order.country)
-        private const val SIGN_TO_VALUE   = "UA"    // → 改成 UA(烏克蘭合法國碼；UAH 是貨幣不是國碼，server 會擋)
+        private const val SIGN_FROM_VALUE = "TWN"   // 烏克蘭客戶：body 內的 TWN(order.country，alpha-3)
+        private const val SIGN_TO_VALUE   = "UKR"   // → UKR(烏克蘭 alpha-3，對齊 TWN 格式；UA=alpha-2 格式不符、UAH=貨幣)
         // 若之後 server 要求 country 用合法國碼(UA/UKR)+currency=UAH，改成對 key 精準改即可（見 hookSign 註解）。
     }
 
