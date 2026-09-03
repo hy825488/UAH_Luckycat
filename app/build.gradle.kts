@@ -10,8 +10,8 @@ android {
         applicationId = "com.luckycat.fp"
         minSdk = 28
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0.0-fprotate"
+        versionCode = 3
+        versionName = "3.0.0-devicefp"
     }
 
     buildTypes {
