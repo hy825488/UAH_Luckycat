@@ -7,27 +7,35 @@ import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 /**
- * Luckycat 登入裝置偽裝 v7（通吃 原神 / 崩壞星穹鐵道 / 絕區零）
+ * Luckycat 帳號/付款裝置偽裝 v8（通吃 原神 / 崩壞星穹鐵道 / 絕區零）
  *
- * 演進：
- *   v6 把裝置改在很底層(Settings.Secure android_id / combo DeviceUtils / InfoModule / device-fp 引擎),
- *       登入成功了,但這些「遊戲引擎本身也在讀」→ 遊戲每次啟動以為是新機 → 重新校驗/重下資源(重跑更新)。
- *   ★v7 只把偽裝縮到【登入/帳號那條(PorteOS)】:
- *       - 帳號伺服器靠登入 header 的 device 認「這帳號在哪台機」→ 只釘這裡就能防帳號串連 + 每次不同的新機。
- *       - 遊戲引擎讀到的是【真機】→ 資源快取穩定 → 不再重跑更新。
- *   登入 header 的最終出口 = PorteOSInfo.getRequestCommonHeader() 回傳的 map(updateCommonHeader 直讀
- *   靜態欄位 deviceFP/deviceID 組成,繞過 getter)→ v7 直接覆寫這個 map + 釘死那兩個靜態欄位。
+ * 定調(使用者)：偽裝只縮到【登入 / 帳號 / 登入後的 createOrder 等付款請求】,
+ *   遊戲引擎讀真機 → 資源快取穩定 → 不再每次重跑更新。
  *
- * 地區不動;root/代理/模擬器風控歸零保留(避免被判改機,布林值不影響資源快取)。
- * ⚠️ 換新登入裝置 = 殺程序重開;首登該帳號會跳一次信箱驗證,驗過即綁定,同啟動內不再跳。
+ * 為什麼不能改底層 getter：miHoYo 遊戲引擎跟登入/付款 SDK 讀「同一組」底層 device getter
+ *   (Settings.Secure android_id / combo DeviceUtils / InfoModule / device-fp 引擎)。改底層 → 遊戲引擎
+ *   也讀到新機 → 以為新裝置 → 重新校驗/重下資源(重跑更新)。v6 就是踩這個。
+ *
+ * ★v8 正解 = 只改「送出去的網路請求」,不碰底層:
+ *   1) 登入/帳號(PorteOS):hook getRequestCommonHeader()/updateCommonHeader() 回傳的 header map +
+ *      釘死 PorteOSInfo 靜態欄位 deviceFP/deviceID(蓋掉非同步監聽器塞回的真值)。
+ *   2) createOrder 等所有付款/帳號請求:hook okhttp Request.build(),凡是【本來就帶 x-rpc-device_fp /
+ *      x-rpc-device_id 的請求】(帳號/付款 API 才帶,遊戲資源下載不帶)→ 把這兩個 header 覆寫成本次固定假值。
+ *      只改 header、不動已簽名的 body(避免 createOrder 的 sign 失效);不碰遊戲引擎本地 device → 不重跑更新。
+ *
+ * 三款共用同一份 ComboSDK/PorteOS SDK(game-agnostic),一顆通吃。地區不動;風控紅旗歸零保留。
+ * ⚠️ 換新登入裝置 = 殺程序重開;首登該帳號跳一次信箱驗證,驗過即綁定,同啟動內不再跳。
  */
 class MainHook : IXposedHookLoadPackage {
 
     companion object {
-        const val TAG = "LuckycatFp7"
+        const val TAG = "LuckycatFp8"
         private const val PORTE_INFO = "com.mihoyo.platform.account.oversea.sdk.PorteOSInfo"
         private const val PORTE_DU   = "com.mihoyo.platform.account.oversea.sdk.internal.shared.utils.DeviceUtils"
-        private const val COMBO_DU   = "com.combosdk.support.base.utils.DeviceUtils" // 只用來關風控旗標
+        private const val COMBO_DU   = "com.combosdk.support.base.utils.DeviceUtils" // 只關風控旗標
+        private const val OKHTTP_BUILDER = "okhttp3.Request\$Builder"
+        private const val H_FP = "x-rpc-device_fp"
+        private const val H_ID = "x-rpc-device_id"
         private val TARGETS = setOf(
             "com.miHoYo.GenshinImpact", "com.miHoYo.ys.mihoyo", "com.miHoYo.Yuanshen",
             "com.HoYoverse.hkrpgoversea", "com.miHoYo.hkrpg",
@@ -40,6 +48,7 @@ class MainHook : IXposedHookLoadPackage {
 
     private val fp: String by lazy { randHex(13) }
     private val did: String by lazy { randHex(16) }
+    private val inBuild = ThreadLocal.withInitial { false }  // 防 okhttp build() 遞迴
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName !in TARGETS) return
@@ -47,16 +56,19 @@ class MainHook : IXposedHookLoadPackage {
         try {
             log("Loaded ${lpparam.packageName}  fp=$fp  device_id=$did")
 
-            // ── 只在登入/帳號(PorteOS)那條偽裝,遊戲引擎讀真機不受影響 ──
-            pin(cl, PORTE_INFO, "getDeviceFP", fp)   // login-scoped getter(belt)
-            pin(cl, PORTE_INFO, "getDeviceID", did)
-            pin(cl, PORTE_DU,   "getDeviceID", did)  // 登入 SDK 的 device_id 來源(帳號 SDK 內部,非遊戲引擎)
-            pinStaticField(cl, PORTE_INFO, "deviceFP", fp)  // 蓋掉非同步監聽器塞回的真值
+            // (1) 登入/帳號 header(PorteOS)
+            pinStaticField(cl, PORTE_INFO, "deviceFP", fp)
             pinStaticField(cl, PORTE_INFO, "deviceID", did)
-            overrideHeaderMap(cl, PORTE_INFO, "getRequestCommonHeader") // ★最終出口:登入/驗證 header
+            overrideHeaderMap(cl, PORTE_INFO, "getRequestCommonHeader")
             overrideHeaderMap(cl, PORTE_INFO, "updateCommonHeader")
+            pin(cl, PORTE_INFO, "getDeviceFP", fp)
+            pin(cl, PORTE_INFO, "getDeviceID", did)
+            pin(cl, PORTE_DU,   "getDeviceID", did)
 
-            // ── 風控紅旗歸零(避免被判改機;布林值,不影響資源快取/不觸發重跑更新) ──
+            // (2) createOrder 等所有付款/帳號請求:凡帶 x-rpc-device_* 的 okhttp 請求就覆寫 header
+            hookOkHttpDeviceHeaders(cl)
+
+            // 風控紅旗歸零(布林,不影響資源快取)
             pin(cl, COMBO_DU, "isRooted", 0)
             pin(cl, COMBO_DU, "isProxy", 0)
             pin(cl, COMBO_DU, "isEmulator", 0)
@@ -64,6 +76,39 @@ class MainHook : IXposedHookLoadPackage {
         } catch (e: Throwable) {
             log("Error: ${e.message}")
         }
+    }
+
+    // ── okhttp:只覆寫「本來就帶 x-rpc-device_* 的請求」的那兩個 header(帳號/付款 API);不動 body ──
+    private fun hookOkHttpDeviceHeaders(cl: ClassLoader) {
+        val builderClass = XposedHelpers.findClassIfExists(OKHTTP_BUILDER, cl)
+        if (builderClass == null) { log("MISS okhttp3.Request\$Builder"); return }
+        try {
+            XposedBridge.hookAllMethods(builderClass, "build", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (inBuild.get()) return
+                    try {
+                        val req = param.result ?: return
+                        val hasFp = header(req, H_FP) != null
+                        val hasId = header(req, H_ID) != null
+                        if (!hasFp && !hasId) return          // 非帳號/付款請求(遊戲資源下載不帶)→ 放行
+                        inBuild.set(true)
+                        val nb = req.javaClass.getMethod("newBuilder").invoke(req)
+                        if (hasFp) setHeader(nb, H_FP, fp)
+                        if (hasId) setHeader(nb, H_ID, did)
+                        param.result = nb.javaClass.getMethod("build").invoke(nb)
+                    } catch (e: Throwable) { log("okhttp rewrite err: ${e.message}") }
+                    finally { inBuild.set(false) }
+                }
+            })
+            log("okhttp x-rpc device header rewrite installed")
+        } catch (e: Throwable) { log("hook okhttp fail: ${e.message}") }
+    }
+
+    private fun header(req: Any, name: String): String? = try {
+        req.javaClass.getMethod("header", String::class.java).invoke(req, name) as? String
+    } catch (e: Throwable) { null }
+    private fun setHeader(builder: Any, name: String, value: String) {
+        builder.javaClass.getMethod("header", String::class.java, String::class.java).invoke(builder, name, value)
     }
 
     private fun pin(cl: ClassLoader, cls: String, method: String, value: Any) {
@@ -103,8 +148,8 @@ class MainHook : IXposedHookLoadPackage {
     private fun forceMap(obj: Any?) {
         val m = obj as? MutableMap<String, Any?> ?: return
         try {
-            if (m.containsKey("x-rpc-device_fp")) m["x-rpc-device_fp"] = fp
-            if (m.containsKey("x-rpc-device_id")) m["x-rpc-device_id"] = did
+            if (m.containsKey(H_FP)) m[H_FP] = fp
+            if (m.containsKey(H_ID)) m[H_ID] = did
         } catch (e: Throwable) {}
     }
 
