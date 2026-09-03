@@ -7,39 +7,27 @@ import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 
 /**
- * Luckycat 裝置身分固定版 v5（通吃 原神 / 崩壞星穹鐵道 / 絕區零）
+ * Luckycat 登入裝置偽裝 v7（通吃 原神 / 崩壞星穹鐵道 / 絕區零）
  *
- * 需求（使用者定調）：每次「冷啟遊戲」的當下產生一筆隨機裝置參數,整個 session 全程用同一筆
- *   → 每次開不一樣、但一次啟動內完全一致（登入信箱驗證才不會無限跳）。
+ * 演進：
+ *   v6 把裝置改在很底層(Settings.Secure android_id / combo DeviceUtils / InfoModule / device-fp 引擎),
+ *       登入成功了,但這些「遊戲引擎本身也在讀」→ 遊戲每次啟動以為是新機 → 重新校驗/重下資源(重跑更新)。
+ *   ★v7 只把偽裝縮到【登入/帳號那條(PorteOS)】:
+ *       - 帳號伺服器靠登入 header 的 device 認「這帳號在哪台機」→ 只釘這裡就能防帳號串連 + 每次不同的新機。
+ *       - 遊戲引擎讀到的是【真機】→ 資源快取穩定 → 不再重跑更新。
+ *   登入 header 的最終出口 = PorteOSInfo.getRequestCommonHeader() 回傳的 map(updateCommonHeader 直讀
+ *   靜態欄位 deviceFP/deviceID 組成,繞過 getter)→ v7 直接覆寫這個 map + 釘死那兩個靜態欄位。
  *
- * ★v5 修正 v4「真機指紋漏出來 + 45 秒內跳 5 個值」的根因（反編譯 7.0.1 + 稽核 agent 得證）：
- *   - 本版其實是【單程序】,跳值不是多程序造成的。
- *   - device_fp 是【非同步網路算出來】的（FingerprintService 用真硬體 ~38 個特徵算）,算好前 SDK 先丟
- *     newDefaultDeviceId()=10 位隨機數頂著,算好後真值(如 38d7f7605390f)存進 in-memory 快取
- *     (AbstractDeviceUniqueIdentifier.deviceFingerprint / PorteOSInfo.deviceFP)後續請求直接讀 → 真機漏出。
- *   - v4 攔的是 SP getter（儲水槽）,真值卻從非同步管線灌進 in-memory（出水口）→ 攔不到。
- *   ✅ v5 改攔【最終出水口 getter】：obtain() / PorteOSInfo.getDeviceFP()/getDeviceID() /
- *      InfoModule.getDeviceFingerprint()/getDeviceId() 一律回本次冷啟固定的那筆假值。
- *      不管底下非同步算出什麼真值、快取什麼,出口恆為我那筆 → 真機不漏、全程一致。
- *
- * 地區完全不動。root/代理/模擬器風控歸零保留。
- * ⚠️ 換新裝置 = 把遊戲從最近工作列滑掉殺程序再重開（只切背景不殺不會換,這是刻意的,避免下單中途亂換）。
- * ⚠️ 換裝置後首登該帳號會跳一次信箱驗證,驗過即綁定該假裝置;同一次啟動內不會再跳。
+ * 地區不動;root/代理/模擬器風控歸零保留(避免被判改機,布林值不影響資源快取)。
+ * ⚠️ 換新登入裝置 = 殺程序重開;首登該帳號會跳一次信箱驗證,驗過即綁定,同啟動內不再跳。
  */
 class MainHook : IXposedHookLoadPackage {
 
     companion object {
-        const val TAG = "LuckycatFp5"
-        // 全部 game-agnostic 共用 ComboSDK class（真實名,非 jadx 的 p004/p005 前綴）
-        private const val ABS_UID  = "com.mihoyo.platform.sdk.devicefp.AbstractDeviceUniqueIdentifier"
-        private const val FP_SP    = "com.mihoyo.platform.sdk.devicefp.DeviceFingerprintSharedPreferences"
+        const val TAG = "LuckycatFp7"
         private const val PORTE_INFO = "com.mihoyo.platform.account.oversea.sdk.PorteOSInfo"
-        private const val PORTE_DU = "com.mihoyo.platform.account.oversea.sdk.internal.shared.utils.DeviceUtils"
-        private const val INFO_MOD = "com.combosdk.framework.module.info.InfoModule"
-        private const val COMBO_DU = "com.combosdk.support.base.utils.DeviceUtils"
-        private const val XDEV_U   = "com.mihoyo.platform.utilities.XDeviceUtils"
-        private const val SETTINGS_SECURE = "android.provider.Settings\$Secure"
-        // 只作用這 7 個確切套件（精確白名單,免誤傷）
+        private const val PORTE_DU   = "com.mihoyo.platform.account.oversea.sdk.internal.shared.utils.DeviceUtils"
+        private const val COMBO_DU   = "com.combosdk.support.base.utils.DeviceUtils" // 只用來關風控旗標
         private val TARGETS = setOf(
             "com.miHoYo.GenshinImpact", "com.miHoYo.ys.mihoyo", "com.miHoYo.Yuanshen",
             "com.HoYoverse.hkrpgoversea", "com.miHoYo.hkrpg",
@@ -50,9 +38,8 @@ class MainHook : IXposedHookLoadPackage {
         fun randHex(n: Int) = buildString { repeat(n) { append(HEX[RND.nextInt(16)]) } }
     }
 
-    // 本次冷啟的固定假身分（單程序 → by lazy 即等於「每次啟動一筆、全程一致」）
-    private val fp: String by lazy { randHex(13) }          // device_fp：13 hex
-    private val did: String by lazy { randHex(16) }         // device_id / android_id：16 hex
+    private val fp: String by lazy { randHex(13) }
+    private val did: String by lazy { randHex(16) }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName !in TARGETS) return
@@ -60,31 +47,16 @@ class MainHook : IXposedHookLoadPackage {
         try {
             log("Loaded ${lpparam.packageName}  fp=$fp  device_id=$did")
 
-            // ── device_fp：釘所有「最終回傳 fp」的出水口（蓋掉非同步真值 + in-memory 快取 + SP + 臨時預設）──
-            pin(cl, ABS_UID,   "obtain", fp)                    // ★AbstractDeviceUniqueIdentifier.obtain() 是總源頭
-            pin(cl, PORTE_INFO,"getDeviceFP", fp)               // 登入 header 讀這個
-            pin(cl, INFO_MOD,  "getDeviceFingerprint", fp)      // combo 通道
-            pin(cl, FP_SP,     "getDeviceFingerprint", fp)      // SP getter 也一併回固定值(不再回 null 觸發亂跳)
-
-            // ── device_id / android_id：兩條通道 + 根,全釘同一筆 ──
-            pin(cl, PORTE_INFO,"getDeviceID", did)              // 登入 header 讀這個
-            pin(cl, INFO_MOD,  "getDeviceId", did)
-            pin(cl, PORTE_DU,  "getDeviceID", did)
-            pin(cl, COMBO_DU,  "getDeviceID", did)
-            pin(cl, COMBO_DU,  "getAndroidID", did)
-            pin(cl, XDEV_U,    "getAndroidID", did)
-            hookSettingsAndroidId(cl)                           // Settings.Secure 兜底(含 getStringForUser)
-
-            // ★★ v6 終極出口：登入 header(updateCommonHeader 直接讀欄位,繞過上面 getter)——
-            //   1) 釘死 PorteOSInfo 的靜態欄位 deviceFP/deviceID(蓋掉非同步監聽器塞回的真值)
-            //   2) hook getRequestCommonHeader():回傳的 map 一律覆寫 x-rpc-device_fp / x-rpc-device_id
-            //   這是所有 PorteOS 登入/驗證請求 header 的最終出口,繞不過去。
-            pinStaticField(cl, PORTE_INFO, "deviceFP", fp)
+            // ── 只在登入/帳號(PorteOS)那條偽裝,遊戲引擎讀真機不受影響 ──
+            pin(cl, PORTE_INFO, "getDeviceFP", fp)   // login-scoped getter(belt)
+            pin(cl, PORTE_INFO, "getDeviceID", did)
+            pin(cl, PORTE_DU,   "getDeviceID", did)  // 登入 SDK 的 device_id 來源(帳號 SDK 內部,非遊戲引擎)
+            pinStaticField(cl, PORTE_INFO, "deviceFP", fp)  // 蓋掉非同步監聽器塞回的真值
             pinStaticField(cl, PORTE_INFO, "deviceID", did)
-            overrideHeaderMap(cl, PORTE_INFO, "getRequestCommonHeader")
+            overrideHeaderMap(cl, PORTE_INFO, "getRequestCommonHeader") // ★最終出口:登入/驗證 header
             overrideHeaderMap(cl, PORTE_INFO, "updateCommonHeader")
 
-            // ── 風控紅旗歸零(改機能出單前提,與地區無關) ──
+            // ── 風控紅旗歸零(避免被判改機;布林值,不影響資源快取/不觸發重跑更新) ──
             pin(cl, COMBO_DU, "isRooted", 0)
             pin(cl, COMBO_DU, "isProxy", 0)
             pin(cl, COMBO_DU, "isEmulator", 0)
@@ -94,7 +66,6 @@ class MainHook : IXposedHookLoadPackage {
         }
     }
 
-    // 把某 class 某方法的所有多載一律「事後改成回傳固定值」(class/方法不存在只警告不 crash)
     private fun pin(cl: ClassLoader, cls: String, method: String, value: Any) {
         val clazz = XposedHelpers.findClassIfExists(cls, cl)
         if (clazz == null) { log("MISS $cls (skip $method)"); return }
@@ -106,25 +77,22 @@ class MainHook : IXposedHookLoadPackage {
         } catch (e: Throwable) { log("pin $cls#$method fail: ${e.message}") }
     }
 
-    // 釘死靜態欄位(蓋掉非同步監聽器塞回的真值);load 時設一次
     private fun pinStaticField(cl: ClassLoader, cls: String, field: String, value: Any) {
         val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: run { log("MISS $cls (skip field $field)"); return }
         try { XposedHelpers.setStaticObjectField(clazz, field, value); log("field $cls.$field := $value") }
         catch (e: Throwable) { log("set field $cls.$field fail: ${e.message}") }
     }
 
-    // hook 某回傳 header Map 的方法,事後把 device 欄位覆寫成固定值(繞不過的最終出口)
     private fun overrideHeaderMap(cl: ClassLoader, cls: String, method: String) {
         val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: return
         try {
             XposedBridge.hookAllMethods(clazz, method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    // 覆寫 getRequestCommonHeader 的回傳 map;也重寫 static 欄位 requestCommonHeader
                     forceMap(param.result)
-                    forceMap(XposedHelpers.getStaticObjectField(param.thisObject?.javaClass ?: return, "requestCommonHeader"))
-                    // 順手把欄位再釘一次(updateCommonHeader 可能剛用真值重建)
-                    try { XposedHelpers.setStaticObjectField(param.thisObject.javaClass, "deviceFP", fp) } catch (e: Throwable) {}
-                    try { XposedHelpers.setStaticObjectField(param.thisObject.javaClass, "deviceID", did) } catch (e: Throwable) {}
+                    val self = param.thisObject ?: return
+                    try { forceMap(XposedHelpers.getStaticObjectField(self.javaClass, "requestCommonHeader")) } catch (e: Throwable) {}
+                    try { XposedHelpers.setStaticObjectField(self.javaClass, "deviceFP", fp) } catch (e: Throwable) {}
+                    try { XposedHelpers.setStaticObjectField(self.javaClass, "deviceID", did) } catch (e: Throwable) {}
                 }
             })
             log("override header via $cls#$method")
@@ -138,19 +106,6 @@ class MainHook : IXposedHookLoadPackage {
             if (m.containsKey("x-rpc-device_fp")) m["x-rpc-device_fp"] = fp
             if (m.containsKey("x-rpc-device_id")) m["x-rpc-device_id"] = did
         } catch (e: Throwable) {}
-    }
-
-    // Settings.Secure.getString / getStringForUser：只把 android_id 短路成本次固定值
-    private fun hookSettingsAndroidId(cl: ClassLoader) {
-        val clazz = XposedHelpers.findClassIfExists(SETTINGS_SECURE, cl) ?: return
-        val cb = object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                if (param.args.size >= 2 && param.args[1] == "android_id") param.result = did
-            }
-        }
-        try { XposedBridge.hookAllMethods(clazz, "getString", cb) } catch (e: Throwable) {}
-        try { XposedBridge.hookAllMethods(clazz, "getStringForUser", cb) } catch (e: Throwable) {}
-        log("Settings.Secure android_id -> $did")
     }
 
     private fun log(msg: String) = XposedBridge.log("$TAG: $msg")
