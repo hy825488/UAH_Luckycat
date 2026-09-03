@@ -170,13 +170,13 @@ class MainHook : IXposedHookLoadPackage {
                         }
 
                         // 2) body device 欄位（若有），用同一台裝置，維持請求內自洽
-                        val json = oldJson ?: readBody(request, cl)
+                        val json: String? = oldJson ?: readBody(request, cl)
                         if (json != null) {
-                            var nj = json
-                            BODY_ID_KEYS.forEach   { nj = setFieldIfPresent(nj, it, dev.deviceId) }
-                            BODY_FP_KEYS.forEach   { nj = setFieldIfPresent(nj, it, dev.deviceFp) }
-                            BODY_MODEL_KEYS.forEach{ nj = setFieldIfPresent(nj, it, dev.model) }
-                            BODY_NAME_KEYS.forEach { nj = setFieldIfPresent(nj, it, dev.name) }
+                            var nj: String = json
+                            for (k in BODY_ID_KEYS)    nj = setFieldIfPresent(nj, k, dev.deviceId)
+                            for (k in BODY_FP_KEYS)    nj = setFieldIfPresent(nj, k, dev.deviceFp)
+                            for (k in BODY_MODEL_KEYS) nj = setFieldIfPresent(nj, k, dev.model)
+                            for (k in BODY_NAME_KEYS)  nj = setFieldIfPresent(nj, k, dev.name)
                             if (nj != json) applyBody(request, builder, nj, cl)
                         }
 
