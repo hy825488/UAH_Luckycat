@@ -75,6 +75,15 @@ class MainHook : IXposedHookLoadPackage {
             pin(cl, XDEV_U,    "getAndroidID", did)
             hookSettingsAndroidId(cl)                           // Settings.Secure 兜底(含 getStringForUser)
 
+            // ★★ v6 終極出口：登入 header(updateCommonHeader 直接讀欄位,繞過上面 getter)——
+            //   1) 釘死 PorteOSInfo 的靜態欄位 deviceFP/deviceID(蓋掉非同步監聽器塞回的真值)
+            //   2) hook getRequestCommonHeader():回傳的 map 一律覆寫 x-rpc-device_fp / x-rpc-device_id
+            //   這是所有 PorteOS 登入/驗證請求 header 的最終出口,繞不過去。
+            pinStaticField(cl, PORTE_INFO, "deviceFP", fp)
+            pinStaticField(cl, PORTE_INFO, "deviceID", did)
+            overrideHeaderMap(cl, PORTE_INFO, "getRequestCommonHeader")
+            overrideHeaderMap(cl, PORTE_INFO, "updateCommonHeader")
+
             // ── 風控紅旗歸零(改機能出單前提,與地區無關) ──
             pin(cl, COMBO_DU, "isRooted", 0)
             pin(cl, COMBO_DU, "isProxy", 0)
@@ -95,6 +104,40 @@ class MainHook : IXposedHookLoadPackage {
             }).size
             if (n > 0) log("pinned $cls#$method x$n -> $value") else log("NOMATCH $cls#$method")
         } catch (e: Throwable) { log("pin $cls#$method fail: ${e.message}") }
+    }
+
+    // 釘死靜態欄位(蓋掉非同步監聽器塞回的真值);load 時設一次
+    private fun pinStaticField(cl: ClassLoader, cls: String, field: String, value: Any) {
+        val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: run { log("MISS $cls (skip field $field)"); return }
+        try { XposedHelpers.setStaticObjectField(clazz, field, value); log("field $cls.$field := $value") }
+        catch (e: Throwable) { log("set field $cls.$field fail: ${e.message}") }
+    }
+
+    // hook 某回傳 header Map 的方法,事後把 device 欄位覆寫成固定值(繞不過的最終出口)
+    private fun overrideHeaderMap(cl: ClassLoader, cls: String, method: String) {
+        val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: return
+        try {
+            XposedBridge.hookAllMethods(clazz, method, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    // 覆寫 getRequestCommonHeader 的回傳 map;也重寫 static 欄位 requestCommonHeader
+                    forceMap(param.result)
+                    forceMap(XposedHelpers.getStaticObjectField(param.thisObject?.javaClass ?: return, "requestCommonHeader"))
+                    // 順手把欄位再釘一次(updateCommonHeader 可能剛用真值重建)
+                    try { XposedHelpers.setStaticObjectField(param.thisObject.javaClass, "deviceFP", fp) } catch (e: Throwable) {}
+                    try { XposedHelpers.setStaticObjectField(param.thisObject.javaClass, "deviceID", did) } catch (e: Throwable) {}
+                }
+            })
+            log("override header via $cls#$method")
+        } catch (e: Throwable) { log("override $cls#$method fail: ${e.message}") }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun forceMap(obj: Any?) {
+        val m = obj as? MutableMap<String, Any?> ?: return
+        try {
+            if (m.containsKey("x-rpc-device_fp")) m["x-rpc-device_fp"] = fp
+            if (m.containsKey("x-rpc-device_id")) m["x-rpc-device_id"] = did
+        } catch (e: Throwable) {}
     }
 
     // Settings.Secure.getString / getStringForUser：只把 android_id 短路成本次固定值
