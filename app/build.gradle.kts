@@ -10,8 +10,8 @@ android {
         applicationId = "com.luckycat.fp"
         minSdk = 28
         targetSdk = 34
-        versionCode = 12
-        versionName = "12.0.0-createorder-resign"
+        versionCode = 13
+        versionName = "13.0.0-toast"
     }
 
     buildTypes {

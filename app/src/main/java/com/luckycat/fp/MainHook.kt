@@ -29,7 +29,7 @@ import java.util.Locale
 class MainHook : IXposedHookLoadPackage {
 
     companion object {
-        const val TAG = "LuckycatFp12"
+        const val TAG = "LuckycatFp13"
         // createOrder 重簽核心
         private const val PAY_MODEL     = "com.mihoyoos.sdk.platform.module.pay.PayModel"
         private const val HTTP_COMPLETE = "com.mihoyoos.sdk.platform.common.utils.HttpCompleteUtils"
@@ -88,7 +88,45 @@ class MainHook : IXposedHookLoadPackage {
             hideEmulatorRoot(cl)   // 藏模擬器/root + CPU 型號
             spoofDeviceSource(cl)  // ★device_id/fp 源頭偽造
             hookCreateOrder(cl)    // ★★createOrder:改 country+device + 重簽
+            installStatusToast(cl, lpparam.packageName)  // 開遊戲時彈 Toast 顯示改了什麼
         } catch (e: Throwable) { log("Error: ${e.message}") }
+    }
+
+    // 開遊戲時彈 Toast,把這次偽裝的內容顯示出來(彈 3 次:載入→標題過渡都看得到)
+    @Volatile private var toastDone = false
+    private fun installStatusToast(cl: ClassLoader, pkg: String) {
+        try {
+            val appCls = XposedHelpers.findClass("android.app.Application", cl)
+            XposedBridge.hookAllMethods(appCls, "onCreate", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (toastDone) return
+                    toastDone = true
+                    val ctx = param.thisObject as? android.content.Context ?: return
+                    val game = when {
+                        pkg.contains("Genshin", true) || pkg.contains("ys", true) || pkg.contains("Yuanshen", true) -> "原神"
+                        pkg.contains("hkrpg", true) -> "星穹鐵道"
+                        pkg.contains("Nap", true) -> "絕區零"
+                        else -> pkg
+                    }
+                    val msg = "Luckycat v13 生效 ✓  [$game]\n" +
+                            "機型: ${prof.brand} ${prof.model}\n" +
+                            "device_id: $did\n" +
+                            "device_fp: $fp\n" +
+                            "CPU: ${prof.chip}\n" +
+                            "androidId: $did\n" +
+                            "createOrder: country對齊帳號 + device改 + 重簽\n" +
+                            "感測器/模擬器旗標: 已洗"
+                    val h = android.os.Handler(android.os.Looper.getMainLooper())
+                    for (delay in longArrayOf(3000, 8000, 15000)) {
+                        h.postDelayed({
+                            try { android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show() }
+                            catch (e: Throwable) { log("toast fail: ${e.message}") }
+                        }, delay)
+                    }
+                    log("status toast scheduled")
+                }
+            })
+        } catch (e: Throwable) { log("installStatusToast fail: ${e.message}") }
     }
 
     // ★★ createOrder 正解:簽名前改參數 + SDK 自己重簽
