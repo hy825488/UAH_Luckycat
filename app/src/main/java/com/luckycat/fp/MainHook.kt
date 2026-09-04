@@ -191,14 +191,10 @@ class MainHook : IXposedHookLoadPackage {
         } catch (e: Throwable) {}
     }
 
-    // ④ device_id / device_fp 全鏈一致(模擬器可拋棄,做到底)
+    // ④ device_id 全鏈一致(模擬器可拋棄,做到底)
+    //   ★device_fp 不偽造:ext 已洗乾淨 → getFp 伺服器會發一個「乾淨真機」的合法 fp,讓它自然流過去
+    //     (偽造 fp 伺服器查無 → 風控擋 -3006)。device_id 是 client 自己產的,可以假。
     private fun deepIdentity(cl: ClassLoader) {
-        // device_fp
-        pin(cl, ABS_UID, "obtain", fp)
-        pin(cl, FP_SP, "getDeviceFingerprint", fp)
-        pin(cl, INFO_MOD, "getDeviceFingerprint", fp)
-        pin(cl, PORTE_INFO, "getDeviceFP", fp)
-        pinStatic(cl, PORTE_INFO, "deviceFP", fp)
         // device_id / android_id
         pin(cl, INFO_MOD, "getDeviceId", did)
         pin(cl, COMBO_DU, "getDeviceID", did); pin(cl, COMBO_DU, "getAndroidID", did)
@@ -221,11 +217,11 @@ class MainHook : IXposedHookLoadPackage {
                     if (inBuild.get()) return
                     try {
                         val req = param.result ?: return
-                        val hasFp = header(req, H_FP) != null; val hasId = header(req, H_ID) != null
-                        if (!hasFp && !hasId) return
+                        val hasId = header(req, H_ID) != null   // ★只改 device_id,device_fp 保留 getFp 真值
+                        if (!hasId) return
                         inBuild.set(true)
                         val nb = req.javaClass.getMethod("newBuilder").invoke(req)
-                        if (hasFp) setHeader(nb, H_FP, fp); if (hasId) setHeader(nb, H_ID, did)
+                        setHeader(nb, H_ID, did)
                         param.result = nb.javaClass.getMethod("build").invoke(nb)
                     } catch (e: Throwable) {} finally { inBuild.set(false) }
                 }
@@ -260,7 +256,7 @@ class MainHook : IXposedHookLoadPackage {
                     forceMap(param.result)
                     val self = param.thisObject ?: return
                     try { forceMap(XposedHelpers.getStaticObjectField(self.javaClass, "requestCommonHeader")) } catch (e: Throwable) {}
-                    try { XposedHelpers.setStaticObjectField(self.javaClass, "deviceFP", fp) } catch (e: Throwable) {}
+                    // ★不動 deviceFP(保留 getFp 真值);只釘 device_id
                     try { XposedHelpers.setStaticObjectField(self.javaClass, "deviceID", did) } catch (e: Throwable) {}
                 }
             })
@@ -269,7 +265,7 @@ class MainHook : IXposedHookLoadPackage {
     @Suppress("UNCHECKED_CAST")
     private fun forceMap(obj: Any?) {
         val m = obj as? MutableMap<String, Any?> ?: return
-        try { if (m.containsKey(H_FP)) m[H_FP] = fp; if (m.containsKey(H_ID)) m[H_ID] = did } catch (e: Throwable) {}
+        try { if (m.containsKey(H_ID)) m[H_ID] = did } catch (e: Throwable) {}  // ★只改 device_id,不動 device_fp
     }
     private fun hookSettingsAndroidId(cl: ClassLoader) {
         val clazz = XposedHelpers.findClassIfExists("android.provider.Settings\$Secure", cl) ?: return
