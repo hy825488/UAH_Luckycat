@@ -53,21 +53,24 @@ class MainHook : IXposedHookLoadPackage {
         private const val HEX = "0123456789abcdef"
         fun randHex(n: Int) = buildString { repeat(n) { append(HEX[RND.nextInt(16)]) } }
 
-        // 成套真旗艦機檔(Android 13 / Qualcomm)——每欄互相對得起來,別東拼西湊
-        // 若你的 redroid 是 Android 12,跟我說,我換成 API31 的檔(fingerprint 內的 13 要對齊)
+        // 成套真旗艦機檔(Android 12 / API31,對齊 MuMuPlayer 12)——每欄互相對得起來,別東拼西湊
         private val PROFILES = listOf(
-            Profile("samsung","samsung","SM-S911B","dm1q","dm1qxeea","kalama","qcom",
-                "samsung/dm1qxeea/dm1q:13/TP1A.220624.014/S911BXXU2AWF9:user/release-keys",
-                "TP1A.220624.014","S911BXXU2AWF9","13",33,"SM8550","Qualcomm Technologies, Inc SM8550"),
-            Profile("Xiaomi","Xiaomi","2211133C","fuxi","fuxi","fuxi","qcom",
-                "Xiaomi/fuxi/fuxi:13/TKQ1.220807.001/V14.0.6.0:user/release-keys",
-                "TKQ1.220807.001","fuxi-user 13","13",33,"SM8550","Qualcomm Technologies, Inc SM8550"),
-            Profile("OnePlus","OnePlus","CPH2449","OP594DL1","CPH2449","kalama","qcom",
-                "OnePlus/CPH2449EEA/OP594DL1:13/TP1A.220905.001/T.R4a7ac1b:user/release-keys",
-                "TP1A.220905.001","T.R4a7ac1b","13",33,"SM8550","Qualcomm Technologies, Inc SM8550"),
-            Profile("Qualcomm","google","Pixel 7","panther","panther","panther","panther",
-                "google/panther/panther:13/TQ3A.230901.001/10750268:user/release-keys",
-                "TQ3A.230901.001","10750268","13",33,"Tensor G2","Google Tensor G2")
+            // 三星 Galaxy S21 5G(SM-G991U,SM8350 高通,A12)
+            Profile("samsung","samsung","SM-G991U","o1q","o1qsqw","lahaina","qcom",
+                "samsung/o1qsqw/o1q:12/SP1A.210812.016/G991USQU5CVK3:user/release-keys",
+                "SP1A.210812.016","G991USQU5CVK3","12",31,"SM8350","Qualcomm Technologies, Inc SM8350"),
+            // 小米 11(M2011K2G,SM8350,A12)
+            Profile("Xiaomi","Xiaomi","M2011K2G","venus","venus","venus","qcom",
+                "Xiaomi/venus/venus:12/SKQ1.211006.001/V13.0.10.0.SKBEUXM:user/release-keys",
+                "SKQ1.211006.001","venus-user 12","12",31,"SM8350","Qualcomm Technologies, Inc SM8350"),
+            // 一加 9(LE2113,SM8350,A12)
+            Profile("OnePlus","OnePlus","LE2113","OnePlus9","OnePlus9EEA","lahaina","qcom",
+                "OnePlus/OnePlus9EEA/OnePlus9:12/RKQ1.211119.001/R.202203301911:user/release-keys",
+                "RKQ1.211119.001","unknown","12",31,"SM8350","Qualcomm Technologies, Inc SM8350"),
+            // Pixel 6(oriole,Tensor,A12)
+            Profile("Google","google","Pixel 6","oriole","oriole","oriole","oriole",
+                "google/oriole/oriole:12/SP2A.220505.008/8782922:user/release-keys",
+                "SP2A.220505.008","slider-1.0-8739948","12",31,"Tensor","Google Tensor")
         )
         data class Profile(
             val manufacturer:String, val brand:String, val model:String, val device:String,
