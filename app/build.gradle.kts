@@ -10,8 +10,8 @@ android {
         applicationId = "com.luckycat.fp"
         minSdk = 28
         targetSdk = 34
-        versionCode = 11
-        versionName = "11.0.0-realfp"
+        versionCode = 12
+        versionName = "12.0.0-createorder-resign"
     }
 
     buildTypes {

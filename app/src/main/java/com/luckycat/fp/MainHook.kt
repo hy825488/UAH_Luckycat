@@ -6,44 +6,42 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
+import java.util.Locale
 
 /**
- * Luckycat 模擬器版 v9（redroid 等模擬器；通吃 原神 / 崩壞星穹鐵道 / 絕區零）
+ * Luckycat v12(模擬器/雲手機通用;通吃 原神 / 崩壞星穹鐵道 / 絕區零)
  *
- * 比真機版(v8)多兩層:①藏模擬器 ②把上報風控的硬體特徵偽造成一台【成套真旗艦機】。
+ * 融合「別人的 sdkpatch 模組」+ 我們前幾版的模擬器加固:
+ *   ★核心(學別人的,正解):createOrder 在【簽名前的參數組裝點】改欄位再【用 SDK 自己的函式重簽】
+ *     - hook com.mihoyoos.sdk.platform.module.pay.PayModel#getCreateOrderParams(回傳 Map)
+ *     - order.device → 假 device_id;order.country → 對齊「帳號的國家」(ISO3)
+ *     - sign → HttpCompleteUtils.Companion.generateSign(order) 重算 → 天生有效(不破簽名)
+ *   ★device 在源頭偽造(學別人的):
+ *     - SDKInfo#deviceId / GameConfig#getDeviceId → 假 device_id
+ *     - AbstractDeviceUniqueIdentifier#obtain → 假 device_fp(源頭捏,全鏈一致;乾淨網路下可行)
+ *   ★我們的模擬器加固(別人沒有,MuMu 需要):
+ *     - CommonRequiredParams#processExtensionParams 整包洗成真機 + 三軸感測器 + emu/root=0
+ *     - Build.* 全套偽裝、藏模擬器(getCpuModel/ro.kernel.qemu/su 檔)
  *
- * 關鍵單點(反編譯得證):device_fp 由伺服器用 app 上報的 ext 特徵算,而整包 ext 由
- *   com.mihoyo.platform.sdk.devicefp.CommonRequiredParams#processExtensionParams(Context,ArrayList)
- *   一個方法組出(回傳 HashMap)。→ afterHook 這個方法、把整包換成成套真機檔(含三軸感測器假值、
- *   emulatorStatus=0、isRoot=0)→ device_fp 從源頭乾淨,不管伺服器要哪些欄位都一致。
- *
- * 另外:
- *   - Build.* 靜態欄位一起換成同一台機(讓 telemetry / astrolabe / isEmulator 字串比對 全域一致)。
- *   - 藏模擬器/root:XDeviceUtils.isEmulator/isRooted→0、SystemProperties ro.kernel.qemu→""、
- *     System.getProperty(proxy)→null、File.exists(su)→false。
- *   - 帳號一致(deep):device_id/device_fp 在 header+body+token+telemetry 全鏈固定同一筆
- *     (模擬器可拋棄,不怕重跑更新,所以做到底)。
- *   - 地區不動(country/currency 原樣;要改 USA+重簽另議)。
- *
- * ⚠️ 有些破綻建議在 redroid 映像層(build.prop)一起改更穩:ro.* 全套屬性、/proc/cpuinfo、清 su 檔。
- *    純過 device_fp 用本插件即可;但 telemetry 的 /proc/cpuinfo(getCpuModel)是原生讀檔,建議映像層放假。
+ * ⚠️ 網路一致性(全局 VPN + 換系統 DNS,無 DNS/IPv6 洩漏)+ 地區三件套對齊,是插件外必須配的。
+ * ⚠️ 帳號被支付風控(135)時,冷卻 ~15 分 + 換設備 + 換 IP 才解,插件改不掉帳號層。
  */
 class MainHook : IXposedHookLoadPackage {
 
     companion object {
-        const val TAG = "LuckycatFp9"
-        private const val CRP        = "com.mihoyo.platform.sdk.devicefp.CommonRequiredParams"
-        private const val ABS_UID    = "com.mihoyo.platform.sdk.devicefp.AbstractDeviceUniqueIdentifier"
-        private const val FP_SP      = "com.mihoyo.platform.sdk.devicefp.DeviceFingerprintSharedPreferences"
-        private const val XDEV_U     = "com.mihoyo.platform.utilities.XDeviceUtils"
-        private const val PORTE_INFO = "com.mihoyo.platform.account.oversea.sdk.PorteOSInfo"
-        private const val PORTE_DU   = "com.mihoyo.platform.account.oversea.sdk.internal.shared.utils.DeviceUtils"
-        private const val COMBO_DU   = "com.combosdk.support.base.utils.DeviceUtils"
-        private const val INFO_MOD   = "com.combosdk.framework.module.info.InfoModule"
-        private const val SYSPROP    = "android.os.SystemProperties"
-        private const val OKHTTP_B   = "okhttp3.Request\$Builder"
-        private const val H_FP = "x-rpc-device_fp"
-        private const val H_ID = "x-rpc-device_id"
+        const val TAG = "LuckycatFp12"
+        // createOrder 重簽核心
+        private const val PAY_MODEL     = "com.mihoyoos.sdk.platform.module.pay.PayModel"
+        private const val HTTP_COMPLETE = "com.mihoyoos.sdk.platform.common.utils.HttpCompleteUtils"
+        private const val ACCOUNT_UTILS = "com.mihoyoos.sdk.platform.common.utils.AccountUtils"
+        // device 源頭
+        private const val SDK_INFO    = "com.mihoyo.combo.info.SDKInfo"
+        private const val GAME_CONFIG = "com.mihoyoos.sdk.platform.config.GameConfig"
+        private const val ABS_UID     = "com.mihoyo.platform.sdk.devicefp.AbstractDeviceUniqueIdentifier"
+        private const val COMBO_DU    = "com.combosdk.support.base.utils.DeviceUtils"
+        private const val PORTE_DU    = "com.mihoyo.platform.account.oversea.sdk.internal.shared.utils.DeviceUtils"
+        private const val XDEV_U      = "com.mihoyo.platform.utilities.XDeviceUtils"
+        private const val CRP         = "com.mihoyo.platform.sdk.devicefp.CommonRequiredParams"
         private val TARGETS = setOf(
             "com.miHoYo.GenshinImpact", "com.miHoYo.ys.mihoyo", "com.miHoYo.Yuanshen",
             "com.HoYoverse.hkrpgoversea", "com.miHoYo.hkrpg",
@@ -53,76 +51,109 @@ class MainHook : IXposedHookLoadPackage {
         private const val HEX = "0123456789abcdef"
         fun randHex(n: Int) = buildString { repeat(n) { append(HEX[RND.nextInt(16)]) } }
 
-        // 成套真旗艦機檔(Android 12 / API31,對齊 MuMuPlayer 12)——每欄互相對得起來,別東拼西湊
+        // Android 12 / SM8350 成套真機檔(對齊 MuMuPlayer 12)
         private val PROFILES = listOf(
-            // 三星 Galaxy S21 5G(SM-G991U,SM8350 高通,A12)
             Profile("samsung","samsung","SM-G991U","o1q","o1qsqw","lahaina","qcom",
                 "samsung/o1qsqw/o1q:12/SP1A.210812.016/G991USQU5CVK3:user/release-keys",
-                "SP1A.210812.016","G991USQU5CVK3","12",31,"SM8350","Qualcomm Technologies, Inc SM8350"),
-            // 小米 11(M2011K2G,SM8350,A12)
+                "SP1A.210812.016","12","SM8350","Qualcomm Technologies, Inc. SM8350"),
             Profile("Xiaomi","Xiaomi","M2011K2G","venus","venus","venus","qcom",
                 "Xiaomi/venus/venus:12/SKQ1.211006.001/V13.0.10.0.SKBEUXM:user/release-keys",
-                "SKQ1.211006.001","venus-user 12","12",31,"SM8350","Qualcomm Technologies, Inc SM8350"),
-            // 一加 9(LE2113,SM8350,A12)
+                "SKQ1.211006.001","12","SM8350","Qualcomm Technologies, Inc. SM8350"),
             Profile("OnePlus","OnePlus","LE2113","OnePlus9","OnePlus9EEA","lahaina","qcom",
                 "OnePlus/OnePlus9EEA/OnePlus9:12/RKQ1.211119.001/R.202203301911:user/release-keys",
-                "RKQ1.211119.001","unknown","12",31,"SM8350","Qualcomm Technologies, Inc SM8350"),
-            // Pixel 6(oriole,Tensor,A12)
-            Profile("Google","google","Pixel 6","oriole","oriole","oriole","oriole",
-                "google/oriole/oriole:12/SP2A.220505.008/8782922:user/release-keys",
-                "SP2A.220505.008","slider-1.0-8739948","12",31,"Tensor","Google Tensor")
+                "RKQ1.211119.001","12","SM8350","Qualcomm Technologies, Inc. SM8350")
         )
         data class Profile(
             val manufacturer:String, val brand:String, val model:String, val device:String,
             val product:String, val board:String, val hardware:String, val fingerprint:String,
-            val display:String, val bootloader:String, val release:String, val sdk:Int,
-            val soc:String, val chip:String)
+            val display:String, val release:String, val soc:String, val chip:String)
     }
 
     private val prof: Profile by lazy { PROFILES[RND.nextInt(PROFILES.size)] }
-    private val fp: String by lazy { randHex(13) }         // device_fp(固定一筆,全鏈一致)
-    private val did: String by lazy { randHex(16) }        // device_id / android_id
+    private val fp: String by lazy { randHex(13) }
+    private val did: String by lazy { randHex(16) }
     private val serial: String by lazy { randHex(16).uppercase() }
-    // 三軸感測器假值(真機一定有;redroid 常回空 → 破綻)。帶微抖動避免固定值。
-    private fun jitter(base: Double) = base + (RND.nextInt(1000) - 500) / 10000.0
-    private val accel: String by lazy { "${"%.4f".format(jitter(0.12))}x${"%.4f".format(jitter(0.19))}x${"%.4f".format(jitter(9.79))}" }
-    private val magn:  String by lazy { "${"%.4f".format(jitter(24.3))}x${"%.4f".format(jitter(-7.8))}x${"%.4f".format(jitter(40.1))}" }
-    private val gyro:  String by lazy { "${"%.4f".format(jitter(0.001))}x${"%.4f".format(jitter(-0.002))}x${"%.4f".format(jitter(0.0015))}" }
-    private val inBuild = ThreadLocal.withInitial { false }
+    private fun jit(b: Double) = b + (RND.nextInt(1000) - 500) / 10000.0
+    private val accel by lazy { "%.4fx%.4fx%.4f".format(jit(0.12), jit(0.19), jit(9.79)) }
+    private val magn  by lazy { "%.4fx%.4fx%.4f".format(jit(24.3), jit(-7.8), jit(40.1)) }
+    private val gyro  by lazy { "%.4fx%.4fx%.4f".format(jit(0.001), jit(-0.002), jit(0.0015)) }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName !in TARGETS) return
         val cl = lpparam.classLoader
         try {
-            log("Loaded ${lpparam.packageName}  profile=${prof.brand}/${prof.model}  fp=$fp  id=$did")
-            spoofBuild()                 // ① Build.* 全換成成套真機(全域一致)
-            hookExtParams(cl)            // ★② 單點覆寫 device_fp 上報的整包 ext(含感測器/旗標)
-            hideEmulatorRoot(cl)         // ③ 藏模擬器/root/proxy
-            deepIdentity(cl)             // ④ device_id/fp 全鏈一致(帳號防串連)
-            hookOkHttpHeaders(cl)        //    付款/帳號請求 header 覆寫
+            log("Loaded ${lpparam.packageName}  profile=${prof.brand}/${prof.model} fp=$fp id=$did")
+            spoofBuild()
+            hookExtParams(cl)      // getFp ext 洗乾淨(含感測器/emu=0)
+            hideEmulatorRoot(cl)   // 藏模擬器/root + CPU 型號
+            spoofDeviceSource(cl)  // ★device_id/fp 源頭偽造
+            hookCreateOrder(cl)    // ★★createOrder:改 country+device + 重簽
         } catch (e: Throwable) { log("Error: ${e.message}") }
     }
 
-    // ① Build.* 靜態欄位 → 成套真機
-    private fun spoofBuild() {
-        val p = prof
-        setB("MANUFACTURER", p.manufacturer); setB("BRAND", p.brand); setB("MODEL", p.model)
-        setB("DEVICE", p.device); setB("PRODUCT", p.product); setB("BOARD", p.board)
-        setB("HARDWARE", p.hardware); setB("FINGERPRINT", p.fingerprint); setB("DISPLAY", p.display)
-        setB("BOOTLOADER", p.bootloader); setB("HOST", "build-host"); setB("USER", "dpi")
-        setB("TAGS", "release-keys"); setB("TYPE", "user"); setB("SERIAL", serial); setB("ID", p.display)
-        setB("CPU_ABI", "arm64-v8a"); setB("CPU_ABI2", "")
-        try { XposedHelpers.setStaticObjectField(Build::class.java, "SUPPORTED_ABIS", arrayOf("arm64-v8a","armeabi-v7a","armeabi")) } catch (e: Throwable) {}
-        try { XposedHelpers.setStaticObjectField(Build.VERSION::class.java, "RELEASE", p.release) } catch (e: Throwable) {}
-        try { XposedHelpers.setStaticIntField(Build.VERSION::class.java, "SDK_INT", p.sdk) } catch (e: Throwable) {}
-        log("Build spoofed -> ${p.brand}/${p.model} (${p.soc}, A${p.release})")
+    // ★★ createOrder 正解:簽名前改參數 + SDK 自己重簽
+    private fun hookCreateOrder(cl: ClassLoader) {
+        val pm = XposedHelpers.findClassIfExists(PAY_MODEL, cl) ?: run { log("MISS PayModel"); return }
+        try {
+            XposedBridge.hookAllMethods(pm, "getCreateOrderParams", object : XC_MethodHook() {
+                @Suppress("UNCHECKED_CAST")
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    try {
+                        val map = param.result as? MutableMap<String, Any?> ?: return
+                        val order = map["order"] as? MutableMap<String, Any?> ?: run { log("[CreateOrder] no order map"); return }
+                        val oldC = order["country"]; val oldD = order["device"]
+                        order["device"] = did                               // 假裝置(跟源頭一致)
+                        accountCountryIso3(cl)?.let { order["country"] = it }  // 對齊帳號國家
+                        val sign = reSign(cl, order)                          // ★用 SDK 自己重簽
+                        if (sign != null) map["sign"] = sign
+                        log("[CreateOrder] country $oldC->${order["country"]} device $oldD->$did resign=${sign!=null}")
+                    } catch (e: Throwable) { log("[CreateOrder] err: ${e.message}") }
+                }
+            })
+            log("hooked PayModel#getCreateOrderParams (rewrite+resign)")
+        } catch (e: Throwable) { log("hook createOrder fail: ${e.message}") }
     }
-    private fun setB(f: String, v: String) { try { XposedHelpers.setStaticObjectField(Build::class.java, f, v) } catch (e: Throwable) { log("Build.$f fail: ${e.message}") } }
 
-    // ★② 單點:CommonRequiredParams.processExtensionParams 回傳的 HashMap 整包覆寫
+    // 呼叫 SDK 自己的 generateSign(Companion / INSTANCE / static 三種都試)
+    private fun reSign(cl: ClassLoader, order: Map<String, Any?>): String? {
+        val cls = XposedHelpers.findClassIfExists(HTTP_COMPLETE, cl) ?: return null
+        for (holder in listOf("Companion", "INSTANCE")) {
+            try {
+                val obj = XposedHelpers.getStaticObjectField(cls, holder)
+                return XposedHelpers.callMethod(obj, "generateSign", order) as? String
+            } catch (e: Throwable) {}
+        }
+        try { return XposedHelpers.callStaticMethod(cls, "generateSign", order) as? String } catch (e: Throwable) {}
+        return null
+    }
+
+    // 帳號的國家 → ISO3(對齊 order.country);讀不到就不動 country
+    private fun accountCountryIso3(cl: ClassLoader): String? {
+        try {
+            val entity = XposedHelpers.callStaticMethod(XposedHelpers.findClass(ACCOUNT_UTILS, cl), "getAccountInfo4Pay") ?: return null
+            val c = XposedHelpers.callMethod(entity, "getCountry") as? String ?: return null
+            if (c.length == 2) { val iso3 = Locale("", c).isO3Country; if (iso3.length == 3) return iso3 }
+            if (c.length == 3) return c
+        } catch (e: Throwable) {}
+        return null
+    }
+
+    // ★device_id / device_fp 源頭偽造
+    private fun spoofDeviceSource(cl: ClassLoader) {
+        pin(cl, SDK_INFO, "deviceId", did)
+        pin(cl, GAME_CONFIG, "getDeviceId", did)
+        pin(cl, ABS_UID, "obtain", fp)          // device_fp 源頭捏
+        pin(cl, COMBO_DU, "getDeviceID", did)
+        pin(cl, COMBO_DU, "getAndroidID", did)
+        pin(cl, PORTE_DU, "getDeviceID", did)
+        pin(cl, XDEV_U, "getAndroidID", did)
+        hookSettingsAndroidId(cl)
+    }
+
+    // getFp 上報 ext 整包洗成真機(含三軸感測器/emu/root=0)
     @Suppress("UNCHECKED_CAST")
     private fun hookExtParams(cl: ClassLoader) {
-        val clazz = XposedHelpers.findClassIfExists(CRP, cl) ?: run { log("MISS $CRP"); return }
+        val clazz = XposedHelpers.findClassIfExists(CRP, cl) ?: run { log("MISS CRP"); return }
         try {
             XposedBridge.hookAllMethods(clazz, "processExtensionParams", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
@@ -130,57 +161,55 @@ class MainHook : IXposedHookLoadPackage {
                     val p = prof
                     fun s(k: String, v: String) { if (m.containsKey(k)) m[k] = v }
                     fun i(k: String, v: Int)    { if (m.containsKey(k)) m[k] = v }
-                    // 硬體特徵(成套真機)
                     s("board", p.board); s("brand", p.brand); s("hardware", p.hardware)
                     s("cpuType", "arm64-v8a"); s("deviceType", p.device); s("display", p.display)
                     s("hostname", "build-host"); s("manufacturer", p.manufacturer); s("productName", p.product)
                     s("model", p.model); s("deviceInfo", p.fingerprint); s("osVersion", p.release)
                     s("buildTags", "release-keys"); s("buildType", "user"); s("buildUser", "dpi")
                     s("serialNumber", serial); s("androidId", did)
-                    // ★感測器(redroid 常空 → 最大破綻)
                     s("accelerometer", accel); s("magnetometer", magn); s("gyroscope", gyro)
-                    // 風控旗標歸零
                     i("emulatorStatus", 0); i("isRoot", 0); i("debugStatus", 0); i("proxyStatus", 0); i("isMockLocation", 0)
-                    log("ext overwritten: ${m.keys.size} keys, sensors filled, emu/root=0")
                 }
             })
-            log("hooked $CRP#processExtensionParams (single-point ext override)")
+            log("hooked CRP#processExtensionParams")
         } catch (e: Throwable) { log("hook ext fail: ${e.message}") }
     }
 
-    // ③ 藏模擬器 / root / proxy
+    // ① Build.* 成套真機
+    private fun spoofBuild() {
+        val p = prof
+        setB("MANUFACTURER", p.manufacturer); setB("BRAND", p.brand); setB("MODEL", p.model)
+        setB("DEVICE", p.device); setB("PRODUCT", p.product); setB("BOARD", p.board)
+        setB("HARDWARE", p.hardware); setB("FINGERPRINT", p.fingerprint); setB("DISPLAY", p.display)
+        setB("HOST", "build-host"); setB("USER", "dpi"); setB("TAGS", "release-keys")
+        setB("TYPE", "user"); setB("SERIAL", serial); setB("ID", p.display); setB("CPU_ABI", "arm64-v8a")
+        try { XposedHelpers.setStaticObjectField(Build::class.java, "SUPPORTED_ABIS", arrayOf("arm64-v8a","armeabi-v7a","armeabi")) } catch (e: Throwable) {}
+        try { XposedHelpers.setStaticObjectField(Build.VERSION::class.java, "RELEASE", p.release) } catch (e: Throwable) {}
+        log("Build spoofed -> ${p.brand}/${p.model} (${p.soc})")
+    }
+    private fun setB(f: String, v: String) { try { XposedHelpers.setStaticObjectField(Build::class.java, f, v) } catch (e: Throwable) {} }
+
+    // ③ 藏模擬器 / root
     private fun hideEmulatorRoot(cl: ClassLoader) {
         pin(cl, XDEV_U, "isEmulator", 0); pin(cl, XDEV_U, "isRooted", 0)
         pin(cl, COMBO_DU, "isEmulator", 0); pin(cl, COMBO_DU, "isRooted", 0)
         pin(cl, COMBO_DU, "isProxy", 0); pin(cl, COMBO_DU, "hasOpenDebugMode", 0)
-        pin(cl, XDEV_U, "getCpuModel", prof.chip)  // telemetry 晶片名(藏 redroid);/proc/cpuinfo 建議映像層
-        // SystemProperties.get:ro.kernel.qemu→"", ro.soc.*→真晶片
-        val sp = XposedHelpers.findClassIfExists(SYSPROP, cl)
+        pin(cl, COMBO_DU, "getCpuModel", prof.chip); pin(cl, XDEV_U, "getCpuModel", prof.chip)
+        val sp = XposedHelpers.findClassIfExists("android.os.SystemProperties", cl)
         if (sp != null) {
-            val cb = object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val key = param.args.getOrNull(0) as? String ?: return
-                    when (key) {
-                        "ro.kernel.qemu" -> param.result = ""
-                        "ro.soc.model" -> param.result = prof.soc
-                        "ro.soc.manufacturer" -> param.result = "QTI"
-                        "ro.hardware" -> param.result = prof.hardware
+            try {
+                XposedBridge.hookAllMethods(sp, "get", object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        when (param.args.getOrNull(0) as? String) {
+                            "ro.kernel.qemu" -> param.result = ""
+                            "ro.soc.model" -> param.result = prof.soc
+                            "ro.soc.manufacturer" -> param.result = "QTI"
+                            "ro.hardware" -> param.result = prof.hardware
+                        }
                     }
-                }
-            }
-            try { XposedBridge.hookAllMethods(sp, "get", cb) } catch (e: Throwable) {}
-            log("SystemProperties hooked (qemu/soc)")
+                })
+            } catch (e: Throwable) {}
         }
-        // proxy 屬性
-        try {
-            XposedHelpers.findAndHookMethod(System::class.java, "getProperty", String::class.java, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val k = param.args[0] as? String ?: return
-                    if (k == "http.proxyHost" || k == "https.proxyHost") param.result = null
-                }
-            })
-        } catch (e: Throwable) {}
-        // su / Superuser.apk 檔案探測
         try {
             XposedHelpers.findAndHookMethod(java.io.File::class.java, "exists", object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
@@ -191,82 +220,6 @@ class MainHook : IXposedHookLoadPackage {
         } catch (e: Throwable) {}
     }
 
-    // ④ device_id 全鏈一致(模擬器可拋棄,做到底)
-    //   ★device_fp 不偽造:ext 已洗乾淨 → getFp 伺服器會發一個「乾淨真機」的合法 fp,讓它自然流過去
-    //     (偽造 fp 伺服器查無 → 風控擋 -3006)。device_id 是 client 自己產的,可以假。
-    private fun deepIdentity(cl: ClassLoader) {
-        // device_id / android_id
-        pin(cl, INFO_MOD, "getDeviceId", did)
-        pin(cl, COMBO_DU, "getDeviceID", did); pin(cl, COMBO_DU, "getAndroidID", did)
-        pin(cl, PORTE_DU, "getDeviceID", did)
-        pin(cl, PORTE_INFO, "getDeviceID", did)
-        pinStatic(cl, PORTE_INFO, "deviceID", did)
-        pin(cl, XDEV_U, "getAndroidID", did)
-        hookSettingsAndroidId(cl)
-        // 登入 header 最終出口
-        overrideHeaderMap(cl, PORTE_INFO, "getRequestCommonHeader")
-        overrideHeaderMap(cl, PORTE_INFO, "updateCommonHeader")
-    }
-
-    // 付款/帳號 okhttp 請求 header 覆寫(帶 x-rpc-device_* 的才動)
-    private fun hookOkHttpHeaders(cl: ClassLoader) {
-        val b = XposedHelpers.findClassIfExists(OKHTTP_B, cl) ?: return
-        try {
-            XposedBridge.hookAllMethods(b, "build", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (inBuild.get()) return
-                    try {
-                        val req = param.result ?: return
-                        val hasId = header(req, H_ID) != null   // ★只改 device_id,device_fp 保留 getFp 真值
-                        if (!hasId) return
-                        inBuild.set(true)
-                        val nb = req.javaClass.getMethod("newBuilder").invoke(req)
-                        setHeader(nb, H_ID, did)
-                        param.result = nb.javaClass.getMethod("build").invoke(nb)
-                    } catch (e: Throwable) {} finally { inBuild.set(false) }
-                }
-            })
-        } catch (e: Throwable) { log("okhttp fail: ${e.message}") }
-    }
-
-    // ── 工具 ──
-    private fun header(req: Any, name: String): String? = try {
-        req.javaClass.getMethod("header", String::class.java).invoke(req, name) as? String } catch (e: Throwable) { null }
-    private fun setHeader(builder: Any, name: String, value: String) {
-        builder.javaClass.getMethod("header", String::class.java, String::class.java).invoke(builder, name, value) }
-
-    private fun pin(cl: ClassLoader, cls: String, method: String, value: Any) {
-        val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: return
-        try {
-            val n = XposedBridge.hookAllMethods(clazz, method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) { param.result = value }
-            }).size
-            if (n == 0) log("NOMATCH $cls#$method")
-        } catch (e: Throwable) { log("pin $cls#$method fail: ${e.message}") }
-    }
-    private fun pinStatic(cl: ClassLoader, cls: String, field: String, value: Any) {
-        val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: return
-        try { XposedHelpers.setStaticObjectField(clazz, field, value) } catch (e: Throwable) {}
-    }
-    private fun overrideHeaderMap(cl: ClassLoader, cls: String, method: String) {
-        val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: return
-        try {
-            XposedBridge.hookAllMethods(clazz, method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    forceMap(param.result)
-                    val self = param.thisObject ?: return
-                    try { forceMap(XposedHelpers.getStaticObjectField(self.javaClass, "requestCommonHeader")) } catch (e: Throwable) {}
-                    // ★不動 deviceFP(保留 getFp 真值);只釘 device_id
-                    try { XposedHelpers.setStaticObjectField(self.javaClass, "deviceID", did) } catch (e: Throwable) {}
-                }
-            })
-        } catch (e: Throwable) {}
-    }
-    @Suppress("UNCHECKED_CAST")
-    private fun forceMap(obj: Any?) {
-        val m = obj as? MutableMap<String, Any?> ?: return
-        try { if (m.containsKey(H_ID)) m[H_ID] = did } catch (e: Throwable) {}  // ★只改 device_id,不動 device_fp
-    }
     private fun hookSettingsAndroidId(cl: ClassLoader) {
         val clazz = XposedHelpers.findClassIfExists("android.provider.Settings\$Secure", cl) ?: return
         val cb = object : XC_MethodHook() {
@@ -276,6 +229,16 @@ class MainHook : IXposedHookLoadPackage {
         }
         try { XposedBridge.hookAllMethods(clazz, "getString", cb) } catch (e: Throwable) {}
         try { XposedBridge.hookAllMethods(clazz, "getStringForUser", cb) } catch (e: Throwable) {}
+    }
+
+    private fun pin(cl: ClassLoader, cls: String, method: String, value: Any) {
+        val clazz = XposedHelpers.findClassIfExists(cls, cl) ?: return
+        try {
+            val n = XposedBridge.hookAllMethods(clazz, method, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) { param.result = value }
+            }).size
+            if (n == 0) log("NOMATCH $cls#$method")
+        } catch (e: Throwable) { log("pin $cls#$method fail: ${e.message}") }
     }
 
     private fun log(msg: String) = XposedBridge.log("$TAG: $msg")
