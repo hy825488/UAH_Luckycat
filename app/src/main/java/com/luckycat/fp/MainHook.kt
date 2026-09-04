@@ -29,7 +29,7 @@ import java.util.Locale
 class MainHook : IXposedHookLoadPackage {
 
     companion object {
-        const val TAG = "LuckycatFp13"
+        const val TAG = "LuckycatFp14"
         // createOrder 重簽核心
         private const val PAY_MODEL     = "com.mihoyoos.sdk.platform.module.pay.PayModel"
         private const val HTTP_COMPLETE = "com.mihoyoos.sdk.platform.common.utils.HttpCompleteUtils"
@@ -108,7 +108,7 @@ class MainHook : IXposedHookLoadPackage {
                         pkg.contains("Nap", true) -> "絕區零"
                         else -> pkg
                     }
-                    val msg = "Luckycat v13 生效 ✓  [$game]\n" +
+                    val msg = "Luckycat v14 生效 ✓  [$game]\n" +
                             "機型: ${prof.brand} ${prof.model}\n" +
                             "device_id: $did\n" +
                             "device_fp: $fp\n" +
@@ -248,14 +248,8 @@ class MainHook : IXposedHookLoadPackage {
                 })
             } catch (e: Throwable) {}
         }
-        try {
-            XposedHelpers.findAndHookMethod(java.io.File::class.java, "exists", object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val path = (param.thisObject as? java.io.File)?.absolutePath ?: return
-                    if (path.endsWith("/su") || path.endsWith("Superuser.apk") || path.contains("magisk")) param.result = false
-                }
-            })
-        } catch (e: Throwable) {}
+        // ★不 hook File.exists:它是 Unity 遊戲最熱的方法(每秒上萬次),全域 hook 會累積開銷→玩一陣子卡死。
+        //   root 隱藏已由 XDeviceUtils.isRooted→0 涵蓋(su 檔存不存在都回沒 root),故 File.exists 多餘,移除。
     }
 
     private fun hookSettingsAndroidId(cl: ClassLoader) {
