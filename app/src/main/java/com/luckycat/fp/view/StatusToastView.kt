@@ -53,12 +53,12 @@ class StatusToastView(
     }
 
     private fun message() =
-        "Luckycat MVVM 生效 ✓  [${gameName()}]\n" +
+        "Luckycat v16 生效 ✓  [${gameName()}]\n" +
         "機型: ${id.profile.brand} ${id.profile.model}\n" +
         "device_id: ${id.deviceId}\n" +
         "device_fp: ${id.deviceFp}\n" +
         "CPU: ${id.profile.chip}\n" +
-        "androidId: ${id.deviceId}\n" +
-        "createOrder: country對齊帳號 + device改 + 重簽\n" +
+        "createOrder: 改country+device+重簽\n" +
+        "★createOrder假回應: 開(實驗)\n" +
         "感測器/模擬器旗標: 已洗"
 }

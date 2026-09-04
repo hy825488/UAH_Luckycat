@@ -3,6 +3,7 @@ package com.luckycat.fp
 import com.luckycat.fp.model.Constants
 import com.luckycat.fp.service.BuildSpoofService
 import com.luckycat.fp.service.CreateOrderService
+import com.luckycat.fp.service.CreateOrderFakeService
 import com.luckycat.fp.service.DeviceSourceService
 import com.luckycat.fp.service.EmulatorHideService
 import com.luckycat.fp.service.ExtParamsService
@@ -60,6 +61,7 @@ class MainHook : IXposedHookLoadPackage {
             EmulatorHideService(cl, id).install()       // 藏模擬器 / root(不 hook File.exists)
             DeviceSourceService(cl, id).install()       // device_id / device_fp 源頭偽造
             CreateOrderService(cl, id).install()        // ★createOrder 改 country+device + 重簽
+            CreateOrderFakeService(cl).install()        // ★★實驗:createOrder 回應直接假成 retcode:0
 
             // 3) View:開遊戲彈 Toast 顯示本次偽裝內容
             StatusToastView(cl, lpparam.packageName, id).install()
