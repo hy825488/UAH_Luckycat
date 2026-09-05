@@ -53,11 +53,12 @@ class StatusToastView(
     }
 
     private fun message() =
-        "Luckycat v17 生效 ✓  [${gameName()}]\n" +
-        "機型: ${id.profile.brand} ${id.profile.model}\n" +
-        "device_id: ${id.deviceId}\n" +
+        "Luckycat v18 生效 ✓  [${gameName()}]\n" +
+        "★★整場偽裝PC電腦版 client_type=3\n" +
+        "PC device_id(54): ${id.deviceId.take(20)}…\n" +
+        "android_id(16): ${id.androidId}\n" +
         "device_fp: ${id.deviceFp}\n" +
-        "CPU: ${id.profile.chip}\n" +
-        "★★createOrder: 偽裝成PC電腦版(client_type=3)+重簽\n" +
+        "OS偽裝: Windows 10 / UnityPlayer\n" +
+        "createOrder: PC形狀+重簽\n" +
         "感測器/模擬器旗標: 已洗"
 }

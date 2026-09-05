@@ -16,7 +16,8 @@ object Constants {
     const val ACCOUNT_UTILS = "com.mihoyoos.sdk.platform.common.utils.AccountUtils"
 
     // ── device 身分源頭 ──
-    const val SDK_INFO    = "com.mihoyo.combo.info.SDKInfo"                                   // deviceId
+    const val SDK_INFO    = "com.mihoyo.combo.info.SDKInfo"                                   // deviceId / getClientType
+    const val PORTE_INFO  = "com.mihoyo.platform.account.oversea.sdk.PorteOSInfo"             // 帳號登入層 getClientType
     const val GAME_CONFIG = "com.mihoyoos.sdk.platform.config.GameConfig"                     // getDeviceId
     const val ABS_UID     = "com.mihoyo.platform.sdk.devicefp.AbstractDeviceUniqueIdentifier" // obtain → device_fp
     const val COMBO_DU    = "com.combosdk.support.base.utils.DeviceUtils"                     // getDeviceID / 藏模擬器

@@ -16,8 +16,13 @@ class FakeIdentity {
     /** 這次抽到的真機檔(Build 偽裝 / getFp ext / CPU 型號都用它)。 */
     val profile: DeviceProfile = DeviceProfile.POOL[RND.nextInt(DeviceProfile.POOL.size)]
 
-    /** 假 device_id(16 hex):= x-rpc-device_id / order.device / android_id。 */
-    val deviceId: String = randHex(16)
+    /** 假 device_id(54 hex,PC 電腦版格式):= x-rpc-device_id / order.device / SDK 各 getDeviceID。
+     *  v18「整場都是 PC」:網路層 device_id 用 PC 長格式,全鏈一致。 */
+    val deviceId: String = randHex(54)
+
+    /** 假 android_id(16 hex,真 Android 格式):只給 Settings.Secure / getAndroidID 用。
+     *  跟 deviceId 分開,避免把 android_id 也弄成 54hex 反成破綻。 */
+    val androidId: String = randHex(16)
 
     /** 假 device_fp(13 hex):= x-rpc-device_fp(源頭在 AbstractDeviceUniqueIdentifier.obtain 捏)。 */
     val deviceFp: String = randHex(13)

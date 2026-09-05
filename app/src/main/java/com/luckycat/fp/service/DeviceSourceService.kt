@@ -17,13 +17,14 @@ import de.robv.android.xposed.XposedHelpers
 class DeviceSourceService(private val cl: ClassLoader, private val id: FakeIdentity) {
 
     fun install() {
-        // device_id 的各個源頭(不同通道各有一個)
+        // 網路層 device_id 的各個源頭(x-rpc-device_id / order.device)→ 54hex PC 格式
         Xp.pin(cl, Constants.SDK_INFO, "deviceId", id.deviceId)
         Xp.pin(cl, Constants.GAME_CONFIG, "getDeviceId", id.deviceId)
         Xp.pin(cl, Constants.COMBO_DU, "getDeviceID", id.deviceId)
-        Xp.pin(cl, Constants.COMBO_DU, "getAndroidID", id.deviceId)
         Xp.pin(cl, Constants.PORTE_DU, "getDeviceID", id.deviceId)
-        Xp.pin(cl, Constants.XDEV_U, "getAndroidID", id.deviceId)
+        // android_id 系(Android 底層欄位)→ 16hex 真格式,跟 device_id 分開
+        Xp.pin(cl, Constants.COMBO_DU, "getAndroidID", id.androidId)
+        Xp.pin(cl, Constants.XDEV_U, "getAndroidID", id.androidId)
 
         // device_fp 源頭:直接在 obtain() 捏假值(全鏈一致;乾淨網路下可行)
         Xp.pin(cl, Constants.ABS_UID, "obtain", id.deviceFp)
@@ -37,11 +38,11 @@ class DeviceSourceService(private val cl: ClassLoader, private val id: FakeIdent
         // getString(cr, name) 與 getStringForUser(cr, name, userId) 的 name 都在 args[1]
         val cb = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if (param.args.size >= 2 && param.args[1] == "android_id") param.result = id.deviceId
+                if (param.args.size >= 2 && param.args[1] == "android_id") param.result = id.androidId
             }
         }
         runCatching { XposedBridge.hookAllMethods(clazz, "getString", cb) }
         runCatching { XposedBridge.hookAllMethods(clazz, "getStringForUser", cb) }
-        Xp.log("[DeviceSrc] android_id -> ${id.deviceId}")
+        Xp.log("[DeviceSrc] android_id -> ${id.androidId} (16hex) / device_id -> ${id.deviceId} (54hex PC)")
     }
 }
