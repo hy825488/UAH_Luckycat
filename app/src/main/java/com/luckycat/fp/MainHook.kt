@@ -2,11 +2,10 @@ package com.luckycat.fp
 
 import com.luckycat.fp.model.Constants
 import com.luckycat.fp.service.BuildSpoofService
-import com.luckycat.fp.service.CreateOrderService
-import com.luckycat.fp.service.CreateOrderFakeService
 import com.luckycat.fp.service.DeviceSourceService
 import com.luckycat.fp.service.EmulatorHideService
 import com.luckycat.fp.service.ExtParamsService
+import com.luckycat.fp.service.PcMasqueradeService
 import com.luckycat.fp.util.Xp
 import com.luckycat.fp.view.StatusToastView
 import com.luckycat.fp.viewmodel.IdentityViewModel
@@ -60,8 +59,7 @@ class MainHook : IXposedHookLoadPackage {
             ExtParamsService(cl, id).install()          // getFp 上報特徵洗成真機 + 三軸感測器
             EmulatorHideService(cl, id).install()       // 藏模擬器 / root(不 hook File.exists)
             DeviceSourceService(cl, id).install()       // device_id / device_fp 源頭偽造
-            CreateOrderService(cl, id).install()        // ★createOrder 改 country+device + 重簽
-            CreateOrderFakeService(cl).install()        // ★★實驗:createOrder 回應直接假成 retcode:0
+            PcMasqueradeService(cl).install()           // ★★實驗:createOrder 整發偽裝成 PC 電腦版(client_type=3)+ 重簽
 
             // 3) View:開遊戲彈 Toast 顯示本次偽裝內容
             StatusToastView(cl, lpparam.packageName, id).install()

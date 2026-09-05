@@ -53,12 +53,11 @@ class StatusToastView(
     }
 
     private fun message() =
-        "Luckycat v16 生效 ✓  [${gameName()}]\n" +
+        "Luckycat v17 生效 ✓  [${gameName()}]\n" +
         "機型: ${id.profile.brand} ${id.profile.model}\n" +
         "device_id: ${id.deviceId}\n" +
         "device_fp: ${id.deviceFp}\n" +
         "CPU: ${id.profile.chip}\n" +
-        "createOrder: 改country+device+重簽\n" +
-        "★createOrder假回應: 開(實驗)\n" +
+        "★★createOrder: 偽裝成PC電腦版(client_type=3)+重簽\n" +
         "感測器/模擬器旗標: 已洗"
 }
