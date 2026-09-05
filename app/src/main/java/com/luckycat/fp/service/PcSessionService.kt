@@ -70,7 +70,8 @@ class PcSessionService(private val cl: ClassLoader, private val id: FakeIdentity
                         val map = param.result as? MutableMap<String, Any?> ?: return
                         val order = map["order"] as? MutableMap<String, Any?> ?: return
                         order["client_type"] = 3
-                        if (order["price_tier"] == null || order["price_tier"] == "") order["price_tier"] = "Tier_1"
+                        // ★ 不要碰 price_tier!它代表使用者選的面額檔位,SDK 已填好。
+                        //   之前寫死 Tier_1(=$1 檔)導致所有面額都被壓成 $1 → 只有 $1 到帳。
                         order["country"] = ""
                         order["device"] = id.deviceId
                         // ★ SDK 簽名只涵蓋「簽名前」的 order 欄位;biz_meta / goods_plat 是簽名後才塞進 order 的
