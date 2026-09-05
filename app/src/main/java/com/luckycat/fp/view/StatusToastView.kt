@@ -53,12 +53,5 @@ class StatusToastView(
     }
 
     private fun message() =
-        "Luckycat v18 生效 ✓  [${gameName()}]\n" +
-        "★★整場偽裝PC電腦版 client_type=3\n" +
-        "PC device_id(54): ${id.deviceId.take(20)}…\n" +
-        "android_id(16): ${id.androidId}\n" +
-        "device_fp: ${id.deviceFp}\n" +
-        "OS偽裝: Windows 10 / UnityPlayer\n" +
-        "createOrder: PC形狀+重簽\n" +
-        "感測器/模擬器旗標: 已洗"
+        "MuMu 版本 12 全部生效 ✓  [${gameName()}]"
 }
