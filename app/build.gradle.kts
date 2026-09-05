@@ -7,7 +7,7 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.luckycat.fp"
+        applicationId = "com.gsnet.mon"
         minSdk = 28
         targetSdk = 34
         versionCode = 16
