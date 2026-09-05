@@ -131,8 +131,11 @@ class MainHook : IXposedHookLoadPackage {
 
     private fun logExchange(cl: ClassLoader, request: Any, response: Any) {
         val url = XposedHelpers.callMethod(request, "url").toString()
-        val name = url.substringAfterLast('/').substringBefore('?')
-        if (name !in setOf("createOrder", "verify", "listAppPayPlat")) return
+        val u = url.lowercase()
+        // 月卡/訂閱可能走別的端點,放寬:所有 luckycat/pay/order/訂閱相關都抓
+        val hit = listOf("luckycat","createorder","/verify","payplat","/order","/pay","subscri","mall","product","goods","month","card","recharge","topup")
+            .any { u.contains(it) }
+        if (!hit) return
         val method = XposedHelpers.callMethod(request, "method") as? String ?: "?"
         val code = XposedHelpers.callMethod(response, "code")
         val sb = StringBuilder()
