@@ -53,5 +53,5 @@ class StatusToastView(
     }
 
     private fun message() =
-        "MuMu 版本 12 全部生效 ✓  [${gameName()}]"
+        "飛飛很帥 MuMu 版本 12 全部生效 ✓  [${gameName()}]"
 }
