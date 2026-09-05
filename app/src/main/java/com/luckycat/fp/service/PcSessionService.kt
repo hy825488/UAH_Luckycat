@@ -73,8 +73,14 @@ class PcSessionService(private val cl: ClassLoader, private val id: FakeIdentity
                         if (order["price_tier"] == null || order["price_tier"] == "") order["price_tier"] = "Tier_1"
                         order["country"] = ""
                         order["device"] = id.deviceId
-                        reSign(order)?.let { map["sign"] = it }
-                        Xp.log("[PC] createOrder body -> PC(device=${id.deviceId}) resign=${map["sign"]!=null}")
+                        // ★ SDK 簽名只涵蓋「簽名前」的 order 欄位;biz_meta / goods_plat 是簽名後才塞進 order 的
+                        //   (見 PayModel.getCreateOrderParams:先 generateSign 再 put biz_meta/goods_plat)。
+                        //   重簽時必須把這兩個剔掉,否則簽名範圍多欄位 → 後端算不一致 →「參數簽名不正確」(ZZZ 就是這個)。
+                        val signMap = LinkedHashMap<String, Any?>(order).apply {
+                            remove("biz_meta"); remove("goods_plat")
+                        }
+                        reSign(signMap)?.let { map["sign"] = it }
+                        Xp.log("[PC] createOrder body -> PC(device=${id.deviceId}) resign=${map["sign"]!=null} signKeys=${signMap.keys.size}")
                     } catch (e: Throwable) { Xp.log("[PC] body err: ${e.message}") }
                 }
             })
